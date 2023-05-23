@@ -770,8 +770,10 @@ class ForagingEnv(AECEnv):
             '''
             #print(f'{self.agent_selection} is dead  action is {action}')
             #self._agent_selector.reinit(self.agents)
+            #''' Comment this portion out to reproduce error
             if len(self.agents) != 0:
                 self.agent_selection = self._agent_selector.next()
+            #'''
             return
         #'''
         #get current agent
