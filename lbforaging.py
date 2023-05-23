@@ -48,36 +48,8 @@ logger = logging.getLogger(__name__)
 
 
 def _game_loop(env, render):
-    """
     
-    obs, ninfo = env.reset()
-    done = False
-
-    if render:
-        env.render()
-        time.sleep(0.5)
-
-    while not done:
-
-        actions = env.action_space.sample()
-
-        nobs, nreward, nterm, ntrunc, ninfo = env.step(actions)
-        if sum(nreward) > 0:
-            print(nreward)
-
-        if render:
-            env.render()
-            time.sleep(0.5)
-
-        done = np.all(nterm)
-    # print(env.players[0].score, env.players[1].score)
-    """
     env.reset()
-    '''
-    if render:
-        env.render()
-        time.sleep(0.5)
-    '''
     for agent in env.agent_iter():
         print(f'agent selection: {env.agent_selection}')
         print(f'current agent: {agent}')
@@ -89,17 +61,6 @@ def _game_loop(env, render):
             action = env.action_space(agent).sample() # this is where you would insert your policy
         
         env.step(action)
-        
-        rews= sum([rew for rew in env.rewards.values()])
-        if rews > 0:
-            print(f'rews: {rews}')
-        print(f'env.cul: {env._cumulative_rewards}')
-        '''
-        if render:
-            env.render()
-            time.sleep(0.5)
-        '''
-    # print(env.players[0].score, env.players[1].score)
 
 def main(game_count=1, render=False):
     #env = gym.make("petting_lbf-v1")
