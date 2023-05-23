@@ -5,22 +5,26 @@ import time
 import gymnasium as gym
 import numpy as np
 import lbforaging
-from lbforaging.foraging.environment import ForagingEnv, make_env
+from lbforaging.foraging.environment import ForagingEnv
 
 import numpy as np
 from pettingzoo.utils.conversions import parallel_wrapper_fn
 
 #initialize ForagingEnv parameters here
-#sight means full observation
+#sight means full observation set as size of field f_size
+f_size= 8
 class raw_env(ForagingEnv):
+    '''
+    sleep time determines how long each episode timestep will be
+    '''
     def __init__(
         self,
         players= 2,
         max_player_level= 2,
-        field_size= (8,8),
+        field_size= (f_size,f_size),
         max_food= 3,
-        sight=  8,
-        max_episode_steps = 10,
+        sight= f_size,
+        max_episode_steps = 50,
         force_coop= False,
         normalize_reward=True,
         grid_observation=False,
@@ -46,13 +50,12 @@ class raw_env(ForagingEnv):
 
 logger = logging.getLogger(__name__)
 
+def _game_loop(env):
 
-def _game_loop(env, render):
-    
     env.reset()
+
     for agent in env.agent_iter():
-        print(f'agent selection: {env.agent_selection}')
-        print(f'current agent: {agent}')
+        
         observation, reward, termination, truncation, info = env.last()
 
         if termination or truncation:
@@ -61,18 +64,19 @@ def _game_loop(env, render):
             action = env.action_space(agent).sample() # this is where you would insert your policy
         
         env.step(action)
+        if (reward):
+            print(f'Player: {agent} - Reward: {reward}')
+    # print(env.players[0].score, env.players[1].score)
 
 def main(game_count=1, render=False):
-    #env = gym.make("petting_lbf-v1")
-    print(raw_env)
+
     env = raw_env()
     #sets the env.render_mode to the argparse input
     env.render_mode= render
-    print(env)
     parallel_env = parallel_wrapper_fn(env)
 
     for episode in range(game_count):
-        _game_loop(env, render)
+        _game_loop(env)
     env.close()
 
 

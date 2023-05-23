@@ -77,33 +77,6 @@ class Player:
         else:
             return self.id
 
-#define make_env here
-def make_env(raw_env):
-    """
-    The env function often wraps the environment in wrappers by default.
-    You can find full documentation for these methods
-    elsewhere in the developer documentation.
-    """
-    #print(raw_env)
-    def env():
-        print(raw_env)
-        env = raw_env()
-        '''
-        internal_render_mode = render_mode if render_mode != "ansi" else "human"
-        # This wrapper is only for environments which print results to the terminal
-        if render_mode == "ansi":
-            env = wrappers.CaptureStdoutWrapper(env)
-        '''
-        # this wrapper helps error handling for discrete action spaces
-        env = wrappers.AssertOutOfBoundsWrapper(env)
-        # Provides a wide vareity of helpful user errors
-        # Strongly recommended
-        env = wrappers.OrderEnforcingWrapper(env)
-        print("here")
-        return env
-    print(env)
-    return env
-
 class ForagingEnv(AECEnv):
     """
     A class that contains rules/actions for the game level-based foraging.
@@ -143,10 +116,10 @@ class ForagingEnv(AECEnv):
         #self.seed() - check to know when to remove or not
         #load players as self.agents
         self.players= [Player() for _ in range(players)]
+        
+        #new implementations to make pettingzoo compatible
         for idx, player in enumerate(self.players):
             player.set_id("player_"+str(idx))
-        
-        #self.agents contains player names 
         self.agents = [player.name for player in self.players]
         self.possible_agents = self.agents[:]
         self._index_map = {
@@ -156,9 +129,7 @@ class ForagingEnv(AECEnv):
         self._agent_selector = agent_selector(self.agents)
 
         self.field = np.zeros(field_size, np.int32)
-
         self.penalty = penalty
-        
         self.max_food = max_food
         self._food_spawned = 0.0
         self.max_player_level = max_player_level
@@ -174,11 +145,7 @@ class ForagingEnv(AECEnv):
         self._grid_observation = grid_observation
         #time to sleep after rendering
         self.sleep_time = sleep_time
-
-        #self.action_space = gym.spaces.Tuple(tuple([gym.spaces.Discrete(6)] * len(self.players)))
-        #self.observation_space = gym.spaces.Tuple(tuple([self._get_observation_space()] * len(self.players)))
         self.viewer = None
-        #self.num_agents = len(self.players)
 
         #init state dimension
         state_dim= 0
@@ -192,29 +159,19 @@ class ForagingEnv(AECEnv):
             self.observation_spaces[player.name] = spaces.Tuple(
                 tuple([self._get_observation_space()]))
 
-        '''
-        #state dim is fixed for now
-        state_dim= len(self._get_observation_space()) * len(self.players)
-        self.state_space = spaces.Box(
-            low=-np.float32(np.inf),
-            high=+np.float32(np.inf),
-            shape=(state_dim,),
-            dtype=np.float32,
-        )
-        '''
         self.current_step = 0
-
+        #pettingzoo compliance
         self.current_actions = [None] * self.num_agents
 
     def observation_space(self, player_name):
         '''
-        Takes in player_name and not player ID
+        Takes in player_name and not player object
         '''
         return self.observation_spaces[player_name]
 
     def action_space(self, player_name):
         '''
-        Takes in player_name and not player ID
+        Takes in player_name and not player object
         '''
         return self.action_spaces[player_name]
 
@@ -314,6 +271,7 @@ class ForagingEnv(AECEnv):
     def game_over(self):
         return self._game_over
 
+    #needed to generate valid actions for all players
     def _gen_valid_moves(self):
         self._valid_actions = {
             player: [
@@ -495,10 +453,6 @@ class ForagingEnv(AECEnv):
             sight=self.sight,
             current_step=self.current_step,
         )
-    
-    #this can be used to return agent level observation based features
-    def _get_info(self):
-        return {}
 
     #return next observation for a player and set the reward, etc
     def _make_player_obs(self, player):
@@ -506,9 +460,7 @@ class ForagingEnv(AECEnv):
         def make_obs_array(observation):
             #using player name
             obs_space = self.observation_space(player.name)
-            print(f'obs_space: {obs_space}')
             obs = np.zeros(flatdim(obs_space), dtype=np.float32)
-            print(f'len_obs: {flatdim(obs_space)}')
             # obs[: observation.field.size] = observation.field.flatten()
             # self player is always first
             seen_players = [p for p in observation.players if p.is_self] + [
@@ -588,11 +540,9 @@ class ForagingEnv(AECEnv):
             layers = make_global_grid_arrays()
             agents_bound = get_agent_grid_bounds(*player.position)
             n_obs= tuple(layers[:, agents_bound[0]:agents_bound[1], agents_bound[2]:agents_bound[3]])
-            print(f"\n\n\{player.name} in if= {n_obs}\n\n")
         else:
             #turn the raw obs to valid obseravation with array
             n_obs = tuple(make_obs_array(raw_obs))
-            print(f"\n\n\{player.name} no if= {n_obs}\n\n")
         self.rewards[player.name]= player.reward
         self.truncations[player.name] = self.game_over
         self.terminations[player.name] = self.game_over   
@@ -623,10 +573,6 @@ class ForagingEnv(AECEnv):
             nterm[player] = obs.game_over
             # ninfo = [{'observation': obs} for obs in observations]
         ninfo = {}
-            
-        # check the space of obs
-        print(f"\n\n\nnobs= {nobs}\n\n")
-        print(f"\n\n\nnobs= {nreward}\n\n")
         
         return nobs, nreward, nterm, ntrunc, ninfo
     
@@ -657,14 +603,9 @@ class ForagingEnv(AECEnv):
         self._gen_valid_moves()
         self.agent_selection = self._agent_selector.reset()
 
-        #nobs, _, _,_, ninfo = self._make_gym_obs()
-        #info= self._get_gym_info()
-        #return a second info dict to capture the info warn of pettingzoo
-        #return nobs, ninfo
-
     def step_env(self):
-        #for p in self.players:
-        #    p.reward = 0
+        for p in self.players:
+            p.reward = 0
         actions= []
         for i, agent in enumerate(self.agents):
             a = self.current_actions[i]
@@ -683,7 +624,6 @@ class ForagingEnv(AECEnv):
             actions.append(action)
 
         loading_players = set()
-        print(f'actions: {actions}')
         # move players
         # if two or more players try to move to the same location they all fail
         collisions = defaultdict(list)
@@ -706,11 +646,12 @@ class ForagingEnv(AECEnv):
 
         # and do movements for non colliding players
 
-        print(f'collisions: {collisions}')
         for k, v in collisions.items():
             if len(v) > 1:  # make sure no more than an player will arrive at location
                 continue
-            v[0].position = k
+            #manual confirmation of an empty location
+            if self._is_empty_location(*k):
+                v[0].position = k
 
         # finally process the loadings:
         while loading_players:
@@ -718,7 +659,6 @@ class ForagingEnv(AECEnv):
             player = loading_players.pop()
             frow, fcol = self.adjacent_food_location(*player.position)
             food = self.field[frow, fcol]
-
             adj_players = self.adjacent_players(frow, fcol)
             adj_players = [
                 p for p in adj_players if p in loading_players or p is player
@@ -744,15 +684,6 @@ class ForagingEnv(AECEnv):
             # and the food is removed
             self.field[frow, fcol] = 0
 
-        # this can be modified to specify truncation and termination later
-        # field.sum gives the scenario when all foods has been eaten
-        # current step gives the trunction condition
-        '''
-        self._game_over = (
-            self.field.sum() == 0 or self._max_episode_steps <= self.current_step
-        )
-        self._gen_valid_moves()
-        '''
         for p in self.players:
             p.score += p.reward
 
@@ -766,33 +697,25 @@ class ForagingEnv(AECEnv):
         ):
             self._was_dead_step(action)
             '''
-            This still needs some touching
+            This still needs some tuning
             '''
-            #print(f'{self.agent_selection} is dead  action is {action}')
-            #self._agent_selector.reinit(self.agents)
-            #''' Comment this portion out to reproduce error
             if len(self.agents) != 0:
                 self.agent_selection = self._agent_selector.next()
-            #'''
             return
         #'''
         #get current agent
         cur_agent = self.agent_selection
         current_idx = self._index_map[self.agent_selection]
-        #next_idx = (current_idx + 1) % self.num_agents
-        #set the next agent as the next agent in selection
-        #print(f'Next agent in step: {self.agent_selection}')
-
         self.current_actions[current_idx] = action
-        #print(f'action= {action}')
 
-        #print(f'self._agent_selector.is_last(): {self._agent_selector.is_last()}')
         if self._agent_selector.is_last():
             self.step_env()
             self.current_step += 1
             self._game_over = (
             self.field.sum() == 0 or self._max_episode_steps <= self.current_step
             )
+            #generate valid moves for all players after env_step
+            self._gen_valid_moves()
         else:
             self._clear_rewards()
 
@@ -800,8 +723,9 @@ class ForagingEnv(AECEnv):
         self.agent_selection = self._agent_selector.next()
         self._cumulative_rewards[cur_agent] = 0
         self._accumulate_rewards()
+        
         #render the game
-        if self.render_mode== "human":
+        if self.render_mode:
             self.render()
             time.sleep(self.sleep_time)
 
