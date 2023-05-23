@@ -8,7 +8,7 @@
 <h1> Table of Contents </h1>
 
 - [About The Project](#about-the-project)
-- [Getting Started](#getting-started)
+- [Usage](#usage)
 
 <!-- ABOUT THE PROJECT -->
 # About The Project
@@ -40,12 +40,16 @@ class Action(Enum):
     EAST = 4
     LOAD = 5
 ```
-Valid actions can always be sampled like in a gym environment, using:
-```python
 
+<!-- USAGE -->
+# Usage
+To use the enviroment with pettingzoo, install pettingzoo==1.22.3 and pyglet==1.5 (if you wish to render the environment in terminal). Anohter known dependencies is six. Any version will do. Just navigate to project directory and run:
+```python
+python lbforaging.py
 ```
-To use the enviroment with pettingzoo, install pettingzoo==1.22.3 and pyglet==1.5 (if you wish to render it). Anohter known dependencies is six
-```
+
+
+
 
 Original Project Link: [https://github.com/semitable/lb-foraging](https://github.com/semitable/lb-foraging)
 
