@@ -2,11 +2,17 @@ import logging
 from collections import namedtuple, defaultdict
 from enum import Enum
 from itertools import product
-from gym import Env
-import gym
-from gym.utils import seeding
+#from gymnasium import Env
+#attempt to use AECEnv from pettingzoo
+import gymnasium as gym
+from gymnasium.utils import seeding
 import numpy as np
-
+from gymnasium import spaces
+from pettingzoo import AECEnv
+from pettingzoo.utils import agent_selector, wrappers
+from gymnasium.spaces.utils import flatdim
+from pettingzoo.utils.agent_selector import agent_selector
+import time
 
 class Action(Enum):
     NONE = 0
@@ -24,8 +30,17 @@ class CellEntity(Enum):
     FOOD = 2
     AGENT = 3
 
-
+#player controller is now used
 class Player:
+    '''
+    Each players stores its own reward, score, history and current timestep
+    It also stores its own ID which can allow each player to be called individually
+    using player.name when no controller is used
+
+    player.name is used in self.agents. pettingzoo implementation steps using player.name
+    The player object can be recovered using "self.players[self._index_map[player.name]]"
+    To get the player idx, use "self._index_map[player.name]"
+    '''
     def __init__(self):
         self.controller = None
         self.position = None
@@ -35,6 +50,7 @@ class Player:
         self.reward = 0
         self.history = None
         self.current_step = None
+        self.id= ""
 
     def setup(self, position, level, field_size):
         self.history = []
@@ -46,23 +62,57 @@ class Player:
     def set_controller(self, controller):
         self.controller = controller
 
+    #unique player ID for each player
+    def set_id(self, id):
+        self.id = id
+
     def step(self, obs):
         return self.controller._step(obs)
 
+    #return the player controller name or player id
     @property
     def name(self):
         if self.controller:
             return self.controller.name
         else:
-            return "Player"
+            return self.id
 
+#define make_env here
+def make_env(raw_env):
+    """
+    The env function often wraps the environment in wrappers by default.
+    You can find full documentation for these methods
+    elsewhere in the developer documentation.
+    """
+    #print(raw_env)
+    def env():
+        print(raw_env)
+        env = raw_env()
+        '''
+        internal_render_mode = render_mode if render_mode != "ansi" else "human"
+        # This wrapper is only for environments which print results to the terminal
+        if render_mode == "ansi":
+            env = wrappers.CaptureStdoutWrapper(env)
+        '''
+        # this wrapper helps error handling for discrete action spaces
+        env = wrappers.AssertOutOfBoundsWrapper(env)
+        # Provides a wide vareity of helpful user errors
+        # Strongly recommended
+        env = wrappers.OrderEnforcingWrapper(env)
+        print("here")
+        return env
+    print(env)
+    return env
 
-class ForagingEnv(Env):
+class ForagingEnv(AECEnv):
     """
     A class that contains rules/actions for the game level-based foraging.
     """
 
-    metadata = {"render.modes": ["human"]}
+    metadata = {"name": "petting_lbf-v1", 
+                "render_modes": ["human"],
+                "render_fps": 10,
+                }
 
     action_set = [Action.NORTH, Action.SOUTH, Action.WEST, Action.EAST, Action.LOAD]
     Observation = namedtuple(
@@ -85,10 +135,25 @@ class ForagingEnv(Env):
         normalize_reward=True,
         grid_observation=False,
         penalty=0.0,
+        render_mode= "human",
+        sleep_time= 0.5
     ):
         self.logger = logging.getLogger(__name__)
-        self.seed()
-        self.players = [Player() for _ in range(players)]
+        self.render_mode = render_mode
+        #self.seed() - check to know when to remove or not
+        #load players as self.agents
+        self.players= [Player() for _ in range(players)]
+        for idx, player in enumerate(self.players):
+            player.set_id("player_"+str(idx))
+        
+        #self.agents contains player names 
+        self.agents = [player.name for player in self.players]
+        self.possible_agents = self.agents[:]
+        self._index_map = {
+            agent: idx for idx, agent in enumerate(self.agents)
+        }
+
+        self._agent_selector = agent_selector(self.agents)
 
         self.field = np.zeros(field_size, np.int32)
 
@@ -107,17 +172,71 @@ class ForagingEnv(Env):
 
         self._normalize_reward = normalize_reward
         self._grid_observation = grid_observation
+        #time to sleep after rendering
+        self.sleep_time = sleep_time
 
-        self.action_space = gym.spaces.Tuple(tuple([gym.spaces.Discrete(6)] * len(self.players)))
-        self.observation_space = gym.spaces.Tuple(tuple([self._get_observation_space()] * len(self.players)))
-
+        #self.action_space = gym.spaces.Tuple(tuple([gym.spaces.Discrete(6)] * len(self.players)))
+        #self.observation_space = gym.spaces.Tuple(tuple([self._get_observation_space()] * len(self.players)))
         self.viewer = None
+        #self.num_agents = len(self.players)
 
-        self.n_agents = len(self.players)
+        #init state dimension
+        state_dim= 0
+        # set spaces
+        self._agent_selector = agent_selector(self.agents)
+        
+        self.action_spaces = dict()
+        self.observation_spaces = dict()
+        for player in self.players:
+            self.action_spaces[player.name] = spaces.Discrete(6)
+            self.observation_spaces[player.name] = spaces.Tuple(
+                tuple([self._get_observation_space()]))
+
+        '''
+        #state dim is fixed for now
+        state_dim= len(self._get_observation_space()) * len(self.players)
+        self.state_space = spaces.Box(
+            low=-np.float32(np.inf),
+            high=+np.float32(np.inf),
+            shape=(state_dim,),
+            dtype=np.float32,
+        )
+        '''
+        self.current_step = 0
+
+        self.current_actions = [None] * self.num_agents
+
+    def observation_space(self, player_name):
+        '''
+        Takes in player_name and not player ID
+        '''
+        return self.observation_spaces[player_name]
+
+    def action_space(self, player_name):
+        '''
+        Takes in player_name and not player ID
+        '''
+        return self.action_spaces[player_name]
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
-        return [seed]
+
+    #must return n_obs as it is called by env.last()
+    #must also set truncation, terminations and reward using player.name
+    def observe(self, player_name):
+        player= self.players[self._index_map[player_name]]
+        return self._make_player_obs(player)
+
+    def state(self):
+        #the logic here is to get the player item in the self.players list
+        #using the index_map which takes the player.name from possible agents
+        #to provide a idx value which gives the player object
+        states = tuple(
+            self._make_player_obs(self.players[
+            self._index_map[agent]]).astype(np.float32)\
+            for agent in self.possible_agents
+        )
+        return np.concatenate(states, axis=None)
 
     def _get_observation_space(self):
         """The Observation Space for each agent.
@@ -159,7 +278,8 @@ class ForagingEnv(Env):
             min_obs = np.stack([agents_min, foods_min, access_min])
             max_obs = np.stack([agents_max, foods_max, access_max])
 
-        return gym.spaces.Box(np.array(min_obs), np.array(max_obs), dtype=np.float32)
+        #new implementation to incoporate pettingzoo
+        return gym.spaces.Box(np.float32(min_obs), np.float32(max_obs))
 
     @classmethod
     def from_obs(cls, obs):
@@ -253,8 +373,8 @@ class ForagingEnv(Env):
 
         while food_count < max_food and attempts < 1000:
             attempts += 1
-            row = self.np_random.randint(1, self.rows - 1)
-            col = self.np_random.randint(1, self.cols - 1)
+            row = np.random.randint(1, self.rows - 1)
+            col = np.random.randint(1, self.cols - 1)
 
             # check if it has neighbors:
             if (
@@ -269,7 +389,7 @@ class ForagingEnv(Env):
                 if min_level == max_level
                 # ! this is excluding food of level `max_level` but is kept for
                 # ! consistency with prior LBF versions
-                else self.np_random.randint(min_level, max_level)
+                else np.random.randint(min_level, max_level)
             )
             food_count += 1
         self._food_spawned = self.field.sum()
@@ -290,12 +410,12 @@ class ForagingEnv(Env):
             player.reward = 0
 
             while attempts < 1000:
-                row = self.np_random.randint(0, self.rows)
-                col = self.np_random.randint(0, self.cols)
+                row = np.random.randint(0, self.rows)
+                col = np.random.randint(0, self.cols)
                 if self._is_empty_location(row, col):
                     player.setup(
                         (row, col),
-                        self.np_random.randint(1, max_player_level + 1),
+                        np.random.randint(1, max_player_level + 1),
                         self.field_size,
                     )
                     break
@@ -339,6 +459,7 @@ class ForagingEnv(Env):
     def get_valid_actions(self) -> list:
         return list(product(*[self._valid_actions[player] for player in self.players]))
 
+    #return player observation
     def _make_obs(self, player):
         return self.Observation(
             actions=self._valid_actions[player],
@@ -374,10 +495,20 @@ class ForagingEnv(Env):
             sight=self.sight,
             current_step=self.current_step,
         )
+    
+    #this can be used to return agent level observation based features
+    def _get_info(self):
+        return {}
 
-    def _make_gym_obs(self):
+    #return next observation for a player and set the reward, etc
+    def _make_player_obs(self, player):
+        #bulid the observation numpy array list
         def make_obs_array(observation):
-            obs = np.zeros(self.observation_space[0].shape, dtype=np.float32)
+            #using player name
+            obs_space = self.observation_space(player.name)
+            print(f'obs_space: {obs_space}')
+            obs = np.zeros(flatdim(obs_space), dtype=np.float32)
+            print(f'len_obs: {flatdim(obs_space)}')
             # obs[: observation.field.size] = observation.field.flatten()
             # self player is always first
             seen_players = [p for p in observation.players if p.is_self] + [
@@ -447,27 +578,72 @@ class ForagingEnv(Env):
             for p in observation.players:
                 if p.is_self:
                     return p.reward
-
-        observations = [self._make_obs(player) for player in self.players]
+                
+        #pettingzoo implementation
+        #id= self._index_map(player.name) #get player index from players list
+        raw_obs = self._make_obs(player)
+        #print(f'obs: {obs}')
         if self._grid_observation:
+            #return the grids
             layers = make_global_grid_arrays()
-            agents_bounds = [get_agent_grid_bounds(*player.position) for player in self.players]
-            nobs = tuple([layers[:, start_x:end_x, start_y:end_y] for start_x, end_x, start_y, end_y in agents_bounds])
+            agents_bound = get_agent_grid_bounds(*player.position)
+            n_obs= tuple(layers[:, agents_bound[0]:agents_bound[1], agents_bound[2]:agents_bound[3]])
+            print(f"\n\n\{player.name} in if= {n_obs}\n\n")
         else:
-            nobs = tuple([make_obs_array(obs) for obs in observations])
-        nreward = [get_player_reward(obs) for obs in observations]
-        ndone = [obs.game_over for obs in observations]
-        # ninfo = [{'observation': obs} for obs in observations]
-        ninfo = {}
-        
+            #turn the raw obs to valid obseravation with array
+            n_obs = tuple(make_obs_array(raw_obs))
+            print(f"\n\n\{player.name} no if= {n_obs}\n\n")
+        self.rewards[player.name]= player.reward
+        self.truncations[player.name] = self.game_over
+        self.terminations[player.name] = self.game_over   
         # check the space of obs
-        for i, obs in  enumerate(nobs):
-            assert self.observation_space[i].contains(obs), \
-                f"obs space error: obs: {obs}, obs_space: {self.observation_space[i]}"
+        assert self._get_observation_space().contains(np.array(n_obs, dtype= np.float32)), \
+            f"obs space error: player: {player.name} obs: {np.array(n_obs, dtype= np.float32)}, \
+                obs_space: {self._get_observation_space()}"
         
-        return nobs, nreward, ndone, ninfo
+        return n_obs
 
-    def reset(self):
+    #no longer used
+    def _make_gym_obs(self):
+                
+        def get_player_reward(observation):
+            for p in observation.players:
+                if p.is_self:
+                    return p.reward
+        
+        #pettingzoo implementation
+        #init all return dicts
+        nobs, nreward, ntrunc, nterm = {}, {}, {}, {}
+        for player in self.players:
+            obs= self._make_player_obs(player)
+            id= self.players.index(player)  #get player index from players list
+            obs = self._make_obs(player)
+            nobs[player] = get_player_reward(obs)
+            ntrunc[player] = obs.game_over
+            nterm[player] = obs.game_over
+            # ninfo = [{'observation': obs} for obs in observations]
+        ninfo = {}
+            
+        # check the space of obs
+        print(f"\n\n\nnobs= {nobs}\n\n")
+        print(f"\n\n\nnobs= {nreward}\n\n")
+        
+        return nobs, nreward, nterm, ntrunc, ninfo
+    
+    #seed included into the reset function
+    def reset(self, seed= None, options= None):
+        if seed is not None:
+            self.seed(seed=seed)
+        
+        #included to match pettingzoo requirement
+        #self.agents = self.possible_agents[:]
+        self.rewards = {player_name: 0.0 for player_name in self.agents}
+        self._cumulative_rewards = {player_name: 0.0 for player_name in self.agents}
+        self.terminations = {player_name: False for player_name in self.agents}
+        self.truncations = {player_name: False for player_name in self.agents}
+        self.infos = {player_name: {} for player_name in self.agents}
+
+        self.current_actions = [None] * self.num_agents
         self.field = np.zeros(self.field_size, np.int32)
         self.spawn_players(self.max_player_level)
         player_levels = sorted([player.level for player in self.players])
@@ -475,36 +651,39 @@ class ForagingEnv(Env):
         self.spawn_food(
             self.max_food, max_level=sum(player_levels[:3])
         )
+
         self.current_step = 0
         self._game_over = False
         self._gen_valid_moves()
+        self.agent_selection = self._agent_selector.reset()
 
-        nobs, _, _, _ = self._make_gym_obs()
-        return nobs
+        #nobs, _, _,_, ninfo = self._make_gym_obs()
+        #info= self._get_gym_info()
+        #return a second info dict to capture the info warn of pettingzoo
+        #return nobs, ninfo
 
-    def step(self, actions):
-        self.current_step += 1
+    def step_env(self):
+        #for p in self.players:
+        #    p.reward = 0
+        actions= []
+        for i, agent in enumerate(self.agents):
+            a = self.current_actions[i]
+            action= Action(a) if Action(a) \
+                in self._valid_actions[self.players[i]] else Action.NONE 
 
-        for p in self.players:
-            p.reward = 0
-
-        actions = [
-            Action(a) if Action(a) in self._valid_actions[p] else Action.NONE
-            for p, a in zip(self.players, actions)
-        ]
-
-        # check if actions are valid
-        for i, (player, action) in enumerate(zip(self.players, actions)):
-            if action not in self._valid_actions[player]:
+            # check if actions are valid
+            if action not in self._valid_actions[self.players[i]]:
                 self.logger.info(
                     "{}{} attempted invalid action {}.".format(
                         player.name, player.position, action
                     )
                 )
-                actions[i] = Action.NONE
+                action = Action.NONE
+            #add action to actions list
+            actions.append(action)
 
         loading_players = set()
-
+        print(f'actions: {actions}')
         # move players
         # if two or more players try to move to the same location they all fail
         collisions = defaultdict(list)
@@ -527,6 +706,7 @@ class ForagingEnv(Env):
 
         # and do movements for non colliding players
 
+        print(f'collisions: {collisions}')
         for k, v in collisions.items():
             if len(v) > 1:  # make sure no more than an player will arrive at location
                 continue
@@ -564,15 +744,64 @@ class ForagingEnv(Env):
             # and the food is removed
             self.field[frow, fcol] = 0
 
+        # this can be modified to specify truncation and termination later
+        # field.sum gives the scenario when all foods has been eaten
+        # current step gives the trunction condition
+        '''
         self._game_over = (
             self.field.sum() == 0 or self._max_episode_steps <= self.current_step
         )
         self._gen_valid_moves()
-
+        '''
         for p in self.players:
             p.score += p.reward
 
-        return self._make_gym_obs()
+    #step implementation
+    def step(self, action):
+        #check if current agent is dead
+        #'''
+        if (
+            self.terminations[self.agent_selection]
+            or self.truncations[self.agent_selection]
+        ):
+            self._was_dead_step(action)
+            '''
+            This still needs some touching
+            '''
+            #print(f'{self.agent_selection} is dead  action is {action}')
+            #self._agent_selector.reinit(self.agents)
+            if len(self.agents) != 0:
+                self.agent_selection = self._agent_selector.next()
+            return
+        #'''
+        #get current agent
+        cur_agent = self.agent_selection
+        current_idx = self._index_map[self.agent_selection]
+        #next_idx = (current_idx + 1) % self.num_agents
+        #set the next agent as the next agent in selection
+        #print(f'Next agent in step: {self.agent_selection}')
+
+        self.current_actions[current_idx] = action
+        #print(f'action= {action}')
+
+        #print(f'self._agent_selector.is_last(): {self._agent_selector.is_last()}')
+        if self._agent_selector.is_last():
+            self.step_env()
+            self.current_step += 1
+            self._game_over = (
+            self.field.sum() == 0 or self._max_episode_steps <= self.current_step
+            )
+        else:
+            self._clear_rewards()
+
+        #set the next agent
+        self.agent_selection = self._agent_selector.next()
+        self._cumulative_rewards[cur_agent] = 0
+        self._accumulate_rewards()
+        #render the game
+        if self.render_mode== "human":
+            self.render()
+            time.sleep(self.sleep_time)
 
     def _init_render(self):
         from .rendering import Viewer
