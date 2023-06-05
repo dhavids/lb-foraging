@@ -5,8 +5,7 @@ import time
 import gymnasium as gym
 import numpy as np
 import lbforaging
-from lbforaging.foraging.environment import ForagingEnv
-
+from lbforaging.foraging.environment import ForagingEnv, make_env
 import numpy as np
 from pettingzoo.utils.conversions import parallel_wrapper_fn
 
@@ -70,10 +69,9 @@ def _game_loop(env):
 
 def main(game_count=1, render=False):
 
-    env = raw_env()
+    env = make_env(raw_env)
+    env= env(render_mode= args.render)
     #sets the env.render_mode to the argparse input
-    env.render_mode= render
-    parallel_env = parallel_wrapper_fn(env)
 
     for episode in range(game_count):
         _game_loop(env)
