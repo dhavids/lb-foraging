@@ -77,6 +77,33 @@ class Player:
         else:
             return self.id
 
+#define make_env here
+def make_env(raw_env):
+    """
+    The env function often wraps the environment in wrappers by default.
+    You can find full documentation for these methods
+    elsewhere in the developer documentation.
+    """
+    #print(raw_env)
+    def env(**kwargs):
+        #print(f'raw_env= {raw_env}')
+        env = raw_env(**kwargs)
+        '''
+        internal_render_mode = render_mode if render_mode != "ansi" else "human"
+        # This wrapper is only for environments which print results to the terminal
+        if render_mode == "ansi":
+            env = wrappers.CaptureStdoutWrapper(env)
+        '''
+        # this wrapper helps error handling for discrete action spaces
+        env = wrappers.AssertOutOfBoundsWrapper(env)
+        # Provides a wide vareity of helpful user errors
+        # Strongly recommended
+        env = wrappers.OrderEnforcingWrapper(env)
+        #print("here")
+        return env
+    return env
+    #'''
+
 class ForagingEnv(AECEnv):
     """
     A class that contains rules/actions for the game level-based foraging.
@@ -604,6 +631,15 @@ class ForagingEnv(AECEnv):
         self.agent_selection = self._agent_selector.reset()
 
     def step_env(self):
+
+        '''        
+        this is just here to handle the env.step(None) requirement after
+        self.truncations have been set. This returns the None and stops any errors
+        as the agents are removed one by one
+        '''
+        if all(value is None for value in self.current_actions):
+                return
+        
         for p in self.players:
             p.reward = 0
         actions= []
@@ -710,6 +746,12 @@ class ForagingEnv(AECEnv):
 
         if self._agent_selector.is_last():
             self.step_env()
+
+            #render the game
+            if self.render_mode:
+                self.render()
+                time.sleep(self.sleep_time)
+                
             self.current_step += 1
             self._game_over = (
             self.field.sum() == 0 or self._max_episode_steps <= self.current_step
@@ -723,11 +765,6 @@ class ForagingEnv(AECEnv):
         self.agent_selection = self._agent_selector.next()
         self._cumulative_rewards[cur_agent] = 0
         self._accumulate_rewards()
-        
-        #render the game
-        if self.render_mode:
-            self.render()
-            time.sleep(self.sleep_time)
 
     def _init_render(self):
         from .rendering import Viewer
